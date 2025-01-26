@@ -2,71 +2,72 @@
 This module takes care of starting the API Server, Loading the DB and Adding the endpoints
 """
 import os
-from flask import Flask, request, jsonify, url_for, send_from_directory
-from flask_migrate import Migrate
-from flask_swagger import swagger
-from api.utils import APIException, generate_sitemap
-from api.models import db
-from api.routes import api
-from api.admin import setup_admin
-from api.commands import setup_commands
+from flask import Flask, request, jsonify, url_for
+from flask_cors import CORS
+from utils import APIException, generate_sitemap
+from datastructures import FamilyStructure
 
-# from models import Person
 
-ENV = "development" if os.getenv("FLASK_DEBUG") == "1" else "production"
-static_file_dir = os.path.join(os.path.dirname(
-    os.path.realpath(__file__)), '../public/')
 app = Flask(__name__)
 app.url_map.strict_slashes = False
+CORS(app)
+jackson_family = FamilyStructure("Jackson")  # Create the jackson family object
 
-# database condiguration
-db_url = os.getenv("DATABASE_URL")
-if db_url is not None:
-    app.config['SQLALCHEMY_DATABASE_URI'] = db_url.replace(
-        "postgres://", "postgresql://")
-else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:////tmp/test.db"
-
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-MIGRATE = Migrate(app, db, compare_type=True)
-db.init_app(app)
-
-# add the admin
-setup_admin(app)
-
-# add the admin
-setup_commands(app)
-
-# Add all endpoints form the API with a "api" prefix
-app.register_blueprint(api, url_prefix='/api')
 
 # Handle/serialize errors like a JSON object
-
-
 @app.errorhandler(APIException)
 def handle_invalid_usage(error):
     return jsonify(error.to_dict()), error.status_code
 
-# generate sitemap with all your endpoints
 
-
-@app.route('/')
+# Generate sitemap with all your endpoints
+@app.route('/', methods=['GET'])
 def sitemap():
-    if ENV == "development":
-        return generate_sitemap(app)
-    return send_from_directory(static_file_dir, 'index.html')
-
-# any other endpoint will try to serve it like a static file
-@app.route('/<path:path>', methods=['GET'])
-def serve_any_other_file(path):
-    if not os.path.isfile(os.path.join(static_file_dir, path)):
-        path = 'index.html'
-    response = send_from_directory(static_file_dir, path)
-    response.cache_control.max_age = 0  # avoid cache memory
-    return response
+    return generate_sitemap(app)
 
 
-# this only runs if `$ python src/main.py` is executed
+@app.route('/members', methods=['GET', 'POST'])
+def members():
+    response_body = {}
+    if request.method == 'GET':
+        members = jackson_family.get_all_members()
+        response_body["message"] = "Listado de miebros de la familia"
+        response_body["results"] = members
+        return response_body, 200
+    if request.method == 'POST':
+        data = request.json
+        jackson_family.add_member(data)
+        response_body["message"] = "Quiero agregar un member"
+        response_body["results"] = jackson_family.get_all_members()
+        return response_body, 200
+
+
+@app.route('/members/<int:member_id>', methods=['GET', 'PUT', 'DELETE'])
+def member(member_id):
+    response_body = {}
+    member = jackson_family.get_member(member_id)
+    if not member:
+        response_body["message"] = f"El member_id: {member_id} mp existe"
+        response_body["results"] = {}
+        return response_body, 400
+    if request.method == 'GET':
+        # member = jackson_family.get_member(member_id)
+        response_body["message"] = f"mensaje desde el GET con int:member_id: {member_id}"
+        response_body["results"] = member[0]
+        return response_body, 200
+    if request.method == 'PUT':
+        pass
+        response_body["message"] = "mensaje desde el PUT con int:member_id"
+        response_body["results"] = {}
+        return response_body, 200
+    if request.method == 'DELETE':
+        jackson_family.delete_member(member_id)
+        response_body["message"] = f"mensaje desde el DELETE con int:member_id {member_id}"
+        response_body["results"] = jackson_family.get_all_members()
+        return response_body, 200
+
+
+# This only runs if `$ python src/app.py` is executed
 if __name__ == '__main__':
-    PORT = int(os.environ.get('PORT', 3001))
+    PORT = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=PORT, debug=True)
